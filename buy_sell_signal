@@ -1,0 +1,244 @@
+from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas_datareader as web
+import requests
+import pandas as pd
+import os
+from telegram.ext import *
+from telegram import *
+
+API_KEY = '  5180999433:l_YT2aShL088-mPvEz2K-Hy0DSkK9b4  '
+
+
+def start(update, context):
+    update.message.reply_text("Welcome!")
+
+
+def help(update, context):
+    update.message.reply_text("""
+    /start - Starts conversation
+    /help - Show this message
+    /sma - In order to analyze by SMA indicator
+    /bb - In order to analyze by BolingerBand indicator
+    """)
+
+
+def sma(update, context):
+    update.message.reply_text("Downloading minute trading data for BTC USD from Bitstamp...")
+    # Get the BTC quote
+    from_symbol = 'BTC'
+    to_symbol = 'USD'
+    exchange = 'Bitstamp'
+    datetime_interval = 'minute'
+
+    def get_filename(from_symbol, to_symbol, exchange, datetime_interval, download_date):
+        return '%s_%s_%s_%s_%s.csv' % (from_symbol, to_symbol, exchange, datetime_interval, download_date)
+
+    def download_data(from_symbol, to_symbol, exchange, datetime_interval):
+        supported_intervals = {'minute', 'hour', 'day'}
+        assert datetime_interval in supported_intervals, \
+            'datetime_interval should be one of %s' % supported_intervals
+        print('Downloading %s trading data for %s %s from %s' %
+              (datetime_interval, from_symbol, to_symbol, exchange))
+        base_url = 'https://min-api.cryptocompare.com/data/histo'
+        url = '%s%s' % (base_url, datetime_interval)
+        params = {'fsym': from_symbol, 'tsym': to_symbol,
+                  'limit': 2000, 'aggregate': 1,
+                  'e': exchange}
+        request = requests.get(url, params=params)
+        data = request.json()
+        return data
+
+    def convert_to_dataframe(data):
+        df = pd.io.json.json_normalize(data, ['Data'])
+        df['datetime'] = pd.to_datetime(df.time, unit='s')
+        df = df[['datetime', 'low', 'high', 'open',
+                 'close', 'volumefrom', 'volumeto']]
+        return df
+
+    def filter_empty_datapoints(df):
+        indices = df[df.sum(axis=1) == 0].index
+        print('Filtering %d empty datapoints' % indices.shape[0])
+        df = df.drop(indices)
+        return df
+
+    data = download_data(from_symbol, to_symbol, exchange, datetime_interval)
+    df = convert_to_dataframe(data)
+    df = filter_empty_datapoints(df)
+    current_datetime = datetime.now().date().isoformat()
+    filename = get_filename(from_symbol, to_symbol, exchange, datetime_interval, current_datetime)
+    print('Saving data to %s' % filename)
+    df.to_csv(filename, index=False)
+
+    def read_dataset(filename):
+        print('Reading data from %s' % filename)
+        df = pd.read_csv(filename)
+        # change type from object to datetime
+        df.datetime = pd.to_datetime(df.datetime)
+        df = df.set_index('datetime')
+        df = df.sort_index()  # sort by datetime
+        print(df.shape)
+        return df
+
+    df = read_dataset(filename)
+    update.message.reply_text("Done! BTC-USD is downloaded")
+    ma_1 = 10
+    ma_2 = 50
+    Stock = from_symbol + to_symbol
+    data = df
+    data[f'SMA_{ma_1}'] = data['close'].rolling(window=ma_1).mean()
+    data[f'SMA_{ma_2}'] = data['close'].rolling(window=ma_2).mean()
+    data = data.iloc[ma_2:]
+    buy_signals = []
+    sell_signals = []
+    trigger = 0
+    for x in range(len(data)):
+        if data[f'SMA_{ma_1}'].iloc[x] > data[f'SMA_{ma_2}'].iloc[x] and trigger != 1:
+            buy_signals.append(data['close'].iloc[x])
+            sell_signals.append(float('nan'))
+            trigger = 1
+        elif data[f'SMA_{ma_1}'].iloc[x] < data[f'SMA_{ma_2}'].iloc[x] and trigger != -1:
+            sell_signals.append(data['close'].iloc[x])
+            buy_signals.append(float('nan'))
+            trigger = -1
+        else:
+            buy_signals.append(float('nan'))
+            sell_signals.append(float('nan'))
+
+    data['Buy Signals'] = buy_signals
+    data['Sell Signals'] = sell_signals
+
+    plt.figure(figsize=[10, 5])
+    plt.plot(data['close'], label='Share Price', alpha=0.5)
+    plt.plot(data[f'SMA_{ma_1}'], label=f'SMA_{ma_1}', color='orange', linestyle="--")
+    plt.plot(data[f'SMA_{ma_2}'], label=f'SMA_{ma_2}', color='pink', linestyle="--")
+    plt.scatter(data.index, data['Buy Signals'], label="Buy Signals", marker="^", color='#00ff00', lw=3)
+    plt.scatter(data.index, data['Sell Signals'], label='Sell Signals', marker="v", color='#ff0000', lw=3)
+    plt.legend(loc='upper left')
+    plt.title(Stock)
+    plt.savefig('my_plot.png')
+    Photo = 'my_plot.png'
+    update.message.reply_photo(photo=open(Photo, 'rb'))
+
+
+def bb(update, context):
+    update.message.reply_text("Downloading minute trading data for BTC USD from Bitstamp...")
+    # Get the BTC quote
+    from_symbol = 'BTC'
+    to_symbol = 'USD'
+    exchange = 'Bitstamp'
+    datetime_interval = 'minute'
+
+    def get_filename(from_symbol, to_symbol, exchange, datetime_interval, download_date):
+        return '%s_%s_%s_%s_%s.csv' % (from_symbol, to_symbol, exchange, datetime_interval, download_date)
+
+    def download_data(from_symbol, to_symbol, exchange, datetime_interval):
+        supported_intervals = {'minute', 'hour', 'day'}
+        assert datetime_interval in supported_intervals, \
+            'datetime_interval should be one of %s' % supported_intervals
+        print('Downloading %s trading data for %s %s from %s' %
+              (datetime_interval, from_symbol, to_symbol, exchange))
+        base_url = 'https://min-api.cryptocompare.com/data/histo'
+        url = '%s%s' % (base_url, datetime_interval)
+        params = {'fsym': from_symbol, 'tsym': to_symbol,
+                  'limit': 2000, 'aggregate': 1,
+                  'e': exchange}
+        request = requests.get(url, params=params)
+        data = request.json()
+        return data
+
+    def convert_to_dataframe(data):
+        df = pd.io.json.json_normalize(data, ['Data'])
+        df['datetime'] = pd.to_datetime(df.time, unit='s')
+        df = df[['datetime', 'low', 'high', 'open',
+                 'close', 'volumefrom', 'volumeto']]
+        return df
+
+    def filter_empty_datapoints(df):
+        indices = df[df.sum(axis=1) == 0].index
+        print('Filtering %d empty datapoints' % indices.shape[0])
+        df = df.drop(indices)
+        return df
+
+    data = download_data(from_symbol, to_symbol, exchange, datetime_interval)
+    df = convert_to_dataframe(data)
+    df = filter_empty_datapoints(df)
+    current_datetime = datetime.now().date().isoformat()
+    filename = get_filename(from_symbol, to_symbol, exchange, datetime_interval, current_datetime)
+    print('Saving data to %s' % filename)
+    df.to_csv(filename, index=False)
+
+    def read_dataset(filename):
+        print('Reading data from %s' % filename)
+        df = pd.read_csv(filename)
+        # change type from object to datetime
+        df.datetime = pd.to_datetime(df.datetime)
+        df = df.set_index('datetime')
+        df = df.sort_index()  # sort by datetime
+        print(df.shape)
+        return df
+
+    df = read_dataset(filename)
+    update.message.reply_text("Done! BTC-USD is downloaded")
+    ma_1 = 60
+    Stock = from_symbol + to_symbol
+    data = df
+    data[f'SMA_{ma_1}'] = data['close'].rolling(window=ma_1).mean()
+    data[f'STDDEV_{ma_1}'] = data['close'].rolling(window=ma_1).std()
+    data['Upper'] = data[f'SMA_{ma_1}'] + 2 * data[f'STDDEV_{ma_1}']
+    data['Lower'] = data[f'SMA_{ma_1}'] - 2 * data[f'STDDEV_{ma_1}']
+    data['Buy_Signal'] = np.where(data['Lower'] > data['close'], True, False)
+    data['Sell_Signal'] = np.where(data['Upper'] < data['close'], True, False)
+    data = data.dropna()
+
+    buys = []
+    sells = []
+    open_pos = False
+
+    for i in range(len(data)):
+        if data.Lower[i] > data.close[i]:
+            if open_pos == False:
+                buys.append(i)
+                open_pos = True
+        elif data.Upper[i] < data.close[i]:
+            if open_pos:
+                sells.append(i)
+                open_pos = False
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(data['close'], label='Share Price', alpha=0.5)
+    plt.plot(data[f'SMA_{ma_1}'], label=f'SMA_{ma_1}', color='orange', linestyle="--")
+    plt.plot(data['Upper'], label='Upper', color='g', linestyle="--", alpha=0.3)
+    plt.plot(data['Lower'], label='Lower', color='r', linestyle="--", alpha=0.3)
+    plt.scatter(data.iloc[buys].index, data.iloc[buys].close, marker='^', color='g')
+    plt.scatter(data.iloc[sells].index, data.iloc[sells].close, marker='v', color='r')
+    plt.fill_between(data.index, data.Upper, data.Lower, color='gray', alpha=0.3)
+    plt.legend(['close', f'SMA_{ma_1}', 'Upper', 'Lower'])
+    plt.savefig('my_plot.png')
+    Photo = 'my_plot.png'
+    update.message.reply_photo(photo=open(Photo, 'rb'))
+
+    merged = pd.concat([data.iloc[buys].close, data.iloc[sells].close], axis=1)
+    merged.columns = ['Buys', 'Sells']
+
+    totalprofit = merged.shift(-1).Sells - merged.Buys
+    relprofits = (merged.shift(-1).Sells - merged.Buys) / merged.Buys
+    mean_profit = relprofits.mean()
+
+
+def handle_message(update, context):
+    update.message.reply_text("Please Download the stock dataset and then analysis it")
+
+
+updater = Updater(API_KEY, use_context=True)
+dp = updater.dispatcher
+
+dp.add_handler(CommandHandler("start", start))
+dp.add_handler(CommandHandler("help", help))
+dp.add_handler(CommandHandler("sma", sma))
+dp.add_handler(CommandHandler("bb", bb))
+dp.add_handler(MessageHandler(Filters.text, handle_message))
+
+updater.start_polling()
+updater.idle()
